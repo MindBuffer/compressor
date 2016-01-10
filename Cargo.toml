@@ -1,6 +1,6 @@
 [package]
 name = "compressor"
-version = "0.1.1"
+version = "0.1.2"
 authors = [
     "mitchmindtree <mitchell.nordine@gmail.com>",
     "JoshuaBatty"
@@ -16,9 +16,9 @@ homepage = "https://github.com/MindBuffer/compressor"
 default = ["dsp-chain"]
 
 [dependencies]
-envelope_detector = "0.1.0"
+envelope_detector = "0.1.2"
 time_calc = "0.10.1"
-dsp-chain = { version = "0.10.0", optional = true }
+dsp-chain = { version = "0.11.0", optional = true }
 
 [dev-dependencies]
 portaudio = "0.6.1"
