@@ -2,7 +2,7 @@
 extern crate dsp;
 
 use {Compressor, Detector, EvenGainFunction, PeakCompressor, RmsCompressor};
-use self::dsp::{FromSample, Sample};
+use self::dsp::Sample;
 
 
 impl<D, F> Compressor<D, F> {
@@ -10,10 +10,9 @@ impl<D, F> Compressor<D, F> {
     /// Compresses the given `output` using a unique gain per channel.
     #[inline]
     pub fn compress_per_channel<S>(&mut self, output: &mut [S], n_frames: usize, n_channels: usize)
-        where S: Sample + FromSample<f32>,
+        where S: Sample + dsp::sample::Duplex<f32>,
               D: Detector,
               F: EvenGainFunction,
-              f32: FromSample<S>,
     {
         let mut idx = 0;
         for _ in 0..n_frames {
@@ -30,10 +29,9 @@ impl<D, F> Compressor<D, F> {
     /// Compresses the given `output` using an even gain across all channels.
     #[inline]
     pub fn compress<S>(&mut self, output: &mut [S], n_frames: usize, n_channels: usize)
-        where S: Sample + FromSample<f32>,
+        where S: Sample + dsp::sample::Duplex<f32>,
               D: Detector,
               F: EvenGainFunction,
-              f32: FromSample<S>,
     {
         let mut idx = 0;
         for _ in 0..n_frames {
@@ -56,9 +54,8 @@ impl<D, F> Compressor<D, F> {
 
 
 impl<S, F> dsp::Node<S> for PeakCompressor<F>
-    where S: Sample + FromSample<f32>,
+    where S: Sample + dsp::sample::Duplex<f32>,
           F: EvenGainFunction,
-          f32: FromSample<S>,
 {
     #[inline]
     fn audio_requested(&mut self, output: &mut [S], settings: dsp::Settings) {
@@ -73,9 +70,8 @@ impl<S, F> dsp::Node<S> for PeakCompressor<F>
 
 
 impl<S, F> dsp::Node<S> for RmsCompressor<F>
-    where S: Sample + FromSample<f32>,
+    where S: Sample + dsp::sample::Duplex<f32>,
           F: EvenGainFunction,
-          f32: FromSample<S>,
 {
     #[inline]
     fn audio_requested(&mut self, output: &mut [S], settings: dsp::Settings) {
