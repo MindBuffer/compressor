@@ -10,17 +10,17 @@ impl<D, F> Compressor<D, F> {
     /// Compresses the given `output` using a unique gain per channel.
     #[inline]
     pub fn compress_per_channel<S>(&mut self, output: &mut [S], n_frames: usize, n_channels: usize)
-        where S: Sample,
+        where S: Sample + dsp::sample::Duplex<f32>,
               D: Detector,
               F: EvenGainFunction,
     {
         let mut idx = 0;
         for _ in 0..n_frames {
             for j in 0..n_channels {
-                let sample = output[idx].to_wave();
+                let sample = output[idx].to_sample::<f32>();
                 let gain = self.next_gain_for_channel(j, sample);
                 let compressed_sample = sample * gain;
-                output[idx] = Sample::from_wave(compressed_sample);
+                output[idx] = compressed_sample.to_sample::<S>();
                 idx += 1;
             }
         }
@@ -29,7 +29,7 @@ impl<D, F> Compressor<D, F> {
     /// Compresses the given `output` using an even gain across all channels.
     #[inline]
     pub fn compress<S>(&mut self, output: &mut [S], n_frames: usize, n_channels: usize)
-        where S: Sample,
+        where S: Sample + dsp::sample::Duplex<f32>,
               D: Detector,
               F: EvenGainFunction,
     {
@@ -38,13 +38,13 @@ impl<D, F> Compressor<D, F> {
             let gain = {
                 let end_idx = idx + n_channels;
                 let slice = &output[idx..end_idx];
-                let samples = slice.iter().map(|s| s.to_wave());
+                let samples = slice.iter().map(|s| s.to_sample::<f32>());
                 self.next_gain(samples)
             };
             for _ in 0..n_channels {
-                let sample = output[idx].to_wave();
+                let sample = output[idx].to_sample::<f32>();
                 let compressed_sample = gain * sample;
-                output[idx] = Sample::from_wave(compressed_sample);
+                output[idx] = compressed_sample.to_sample::<S>();
                 idx += 1;
             }
         }
@@ -54,7 +54,7 @@ impl<D, F> Compressor<D, F> {
 
 
 impl<S, F> dsp::Node<S> for PeakCompressor<F>
-    where S: Sample,
+    where S: Sample + dsp::sample::Duplex<f32>,
           F: EvenGainFunction,
 {
     #[inline]
@@ -70,7 +70,7 @@ impl<S, F> dsp::Node<S> for PeakCompressor<F>
 
 
 impl<S, F> dsp::Node<S> for RmsCompressor<F>
-    where S: Sample,
+    where S: Sample + dsp::sample::Duplex<f32>,
           F: EvenGainFunction,
 {
     #[inline]

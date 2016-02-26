@@ -99,15 +99,15 @@ impl<D, F> Compressor<D, F> where D: Detector {
 
 }
 
-impl<F> Compressor<PeakEnvelopeDetector, F> {
+impl<F> PeakCompressor<F> {
 
     /// Construct a **Compressor** that uses a **Peak** **EnvelopeDetector**.
-    pub fn peak<A, R>(attack_ms: A,
-                      release_ms: R,
-                      sample_hz: f64,
-                      n_channels: usize,
-                      threshold: f32,
-                      ratio: f32) -> Self
+    pub fn new<A, R>(attack_ms: A,
+                     release_ms: R,
+                     sample_hz: f64,
+                     n_channels: usize,
+                     threshold: f32,
+                     ratio: f32) -> Self
         where A: Into<Ms>,
               R: Into<Ms>,
     {
@@ -130,10 +130,10 @@ impl<F> Compressor<PeakEnvelopeDetector, F> {
 
 }
 
-impl<F> Compressor<RmsEnvelopeDetector, F> {
+impl<F> RmsCompressor<F> {
 
     /// Construct a **Compressor** that uses an **Rms** **EnvelopeDetector**.
-    pub fn rms<W, A, R>(window_ms: W,
+    pub fn new<W, A, R>(window_ms: W,
                         attack_ms: A,
                         release_ms: R,
                         sample_hz: f64,
