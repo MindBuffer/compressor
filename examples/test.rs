@@ -5,7 +5,7 @@ extern crate dsp;
 extern crate envelope_detector;
 extern crate portaudio as pa;
 
-use compressor::{Compressor, Minimum};
+use compressor::{PeakCompressor, Minimum};
 use dsp::Node;
 
 fn main() {
@@ -23,7 +23,7 @@ fn run() -> Result<(), pa::Error> {
 
     let n_channels = CHANNELS as usize;
     let mut compressor =
-        Compressor::<Minimum>::peak(ATTACK_MS, RELEASE_MS, SAMPLE_HZ, n_channels, THRESHOLD, RATIO);
+        PeakCompressor::<Minimum>::new(ATTACK_MS, RELEASE_MS, SAMPLE_HZ, n_channels, THRESHOLD, RATIO);
 
     // Callback used to construct the duplex sound stream.
     let callback = move |pa::DuplexStreamCallbackArgs { in_buffer, out_buffer, frames, .. }| {
@@ -55,7 +55,7 @@ fn run() -> Result<(), pa::Error> {
 
     // Wait for our stream to finish.
     while let Ok(true) = stream.is_active() {
-        ::std::thread::sleep_ms(16);
+        ::std::thread::sleep(::std::time::Duration::from_millis(16));
     }
 
     Ok(())
