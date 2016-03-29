@@ -151,7 +151,6 @@ impl<F, D, EGF> Compressor<F, D, EGF>
     #[inline]
     pub fn next_frame(&mut self, next_frame: F) -> F {
         let gain = self.next_gain(next_frame);
-        println!("gain: {:?}", gain.to_sample::<f32>());
         next_frame.scale_amp(gain)
     }
 
