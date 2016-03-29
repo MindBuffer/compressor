@@ -14,7 +14,7 @@
 extern crate envelope_detector;
 extern crate time_calc as time;
 
-use envelope_detector::MultiChannelEnvelopeDetector;
+use envelope_detector::{EnvelopeDetector, Frame, Sample};
 use std::marker::PhantomData;
 use time::Ms;
 
@@ -36,7 +36,7 @@ pub use even_gain_fn::{EvenGainFunction, Average, Minimum};
 /// the [**EvenGainFunction**](./even_gain_fn/trait.EvenGainFunction) (used to determine the gain
 /// that will be applied evenly to all channels for a single frame).
 #[derive(Clone, Debug)]
-pub struct Compressor<D, F> {
+pub struct Compressor<F, D, EGF> {
     /// The **EnvelopeDetector** used to create a "loudness" envelope.
     envelope_detector: D,
     /// The envelope attack duration in milliseconds.
@@ -55,13 +55,23 @@ pub struct Compressor<D, F> {
     slope: f32,
     /// Some function that yields a gain to be applied evenly across all channels in a single
     /// frame.
-    even_gain_fn: PhantomData<F>,
+    even_gain_fn: PhantomData<EGF>,
+    frame: PhantomData<F>,
 }
 
 /// A **Compressor** that uses a **Peak** envelope detector.
-pub type PeakCompressor<F> = Compressor<PeakEnvelopeDetector, F>;
+pub type PeakCompressor<F, EGF> = Compressor<F, PeakEnvelopeDetector<F>, EGF>;
+/// A **Compressor** that uses the average across channels yielded by a **Peak** envelope detector.
+pub type PeakAvgCompressor<F> = PeakCompressor<F, Average>;
+/// A **Compressor** that uses the minimum across channels yielded by a **Peak** envelope detector.
+pub type PeakMinCompressor<F> = PeakCompressor<F, Minimum>;
+
 /// A **Compressor** that uses an **Rms** envelope detector.
-pub type RmsCompressor<F> = Compressor<RmsEnvelopeDetector, F>;
+pub type RmsCompressor<F, EGF> = Compressor<F, RmsEnvelopeDetector<F>, EGF>;
+/// A **Compressor** that uses the average across channels yielded by a **Rms** envelope detector.
+pub type RmsAvgCompressor<F> = RmsCompressor<F, Average>;
+/// A **Compressor** that uses the minimum across channels yielded by a **Rms** envelope detector.
+pub type RmsMinCompressor<F> = RmsCompressor<F, Minimum>;
 
 
 fn calc_slope(ratio: f32) -> f32 {
@@ -69,7 +79,28 @@ fn calc_slope(ratio: f32) -> f32 {
 }
 
 
-impl<D, F> Compressor<D, F> where D: Detector {
+impl<F, D, EGF> Compressor<F, D, EGF>
+    where F: Frame,
+          D: Detector<F>,
+          EGF: EvenGainFunction,
+{
+
+    /// Construct a new `Compressor` from its parts.
+    ///
+    /// This is a private constructor wrapped by the more specific `rms` and `peak` public
+    /// constructors.
+    fn new(detector: D, attack_ms: Ms, release_ms: Ms, threshold: f32, ratio: f32) -> Self {
+        let slope = calc_slope(ratio);
+        Compressor {
+            envelope_detector: detector,
+            attack_ms: attack_ms,
+            release_ms: release_ms,
+            threshold: threshold,
+            slope: slope,
+            even_gain_fn: std::marker::PhantomData,
+            frame: std::marker::PhantomData,
+        }
+    }
 
     /// Set the duration of the envelope's attack in milliseconds.
     pub fn set_attack_ms<M: Into<Ms>>(&mut self, ms: M, sample_hz: f64) {
@@ -97,17 +128,46 @@ impl<D, F> Compressor<D, F> where D: Detector {
         self.envelope_detector.detector().set_release_frames(frames);
     }
 
+    /// Steps forward the detectors using the given frame and determines the gain per-channel,
+    /// yielding the result as a `Frame`.
+    pub fn next_gain_per_channel(&mut self, next_frame: F) -> F::Float {
+        let threshold = self.threshold.to_sample();
+        let slope = self.slope.to_sample();
+        let identity = <F::Sample as Sample>::identity();
+        let env_frame = self.envelope_detector.detector().next(next_frame).to_float_frame();
+        env_frame.map(|s| {
+            let s = if s > identity { identity } else { s }; // Clamp `s` between 0.0...1.0.
+            if s > threshold { identity - (s - threshold) * slope } else { identity }
+        })
+    }
+
+    /// Produce the gain to be applied evenly across all channels for the next frame.
+    #[inline]
+    pub fn next_gain(&mut self, next_frame: F) -> <F::Sample as Sample>::Float {
+        EGF::next_gain(self, next_frame)
+    }
+
+    /// Steps forward the `Compressor` by the given frame and returns the compressed result.
+    #[inline]
+    pub fn next_frame(&mut self, next_frame: F) -> F {
+        let gain = self.next_gain(next_frame);
+        println!("gain: {:?}", gain.to_sample::<f32>());
+        next_frame.scale_amp(gain)
+    }
+
 }
 
-impl<F> PeakCompressor<F> {
+impl<F, EGF> PeakCompressor<F, EGF>
+    where F: Frame,
+          EGF: EvenGainFunction,
+{
 
     /// Construct a **Compressor** that uses a **Peak** **EnvelopeDetector**.
-    pub fn new<A, R>(attack_ms: A,
-                     release_ms: R,
-                     sample_hz: f64,
-                     n_channels: usize,
-                     threshold: f32,
-                     ratio: f32) -> Self
+    pub fn peak<A, R>(attack_ms: A,
+                      release_ms: R,
+                      sample_hz: f64,
+                      threshold: f32,
+                      ratio: f32) -> Self
         where A: Into<Ms>,
               R: Into<Ms>,
     {
@@ -115,29 +175,60 @@ impl<F> PeakCompressor<F> {
         let release_ms: Ms = release_ms.into();
         let attack_frames = attack_ms.samples(sample_hz) as f32;
         let release_frames = release_ms.samples(sample_hz) as f32;
-        let envelope_detector =
-            MultiChannelEnvelopeDetector::peak(attack_frames, release_frames, n_channels);
-        let slope = calc_slope(ratio);
-        Compressor {
-            envelope_detector: envelope_detector,
-            attack_ms: attack_ms,
-            release_ms: release_ms,
-            threshold: threshold,
-            slope: slope,
-            even_gain_fn: PhantomData,
-        }
+        let envelope_detector = EnvelopeDetector::peak(attack_frames, release_frames);
+        Compressor::new(envelope_detector, attack_ms, release_ms, threshold, ratio)
     }
 
 }
 
-impl<F> RmsCompressor<F> {
+impl<F> PeakAvgCompressor<F>
+    where F: Frame,
+{
+
+    /// Construct a **Compressor** that uses the **Average** across all channels yielded by a
+    /// **Peak** **EnvelopeDetector**
+    pub fn peak_avg<A, R>(attack_ms: A,
+                          release_ms: R,
+                          sample_hz: f64,
+                          threshold: f32,
+                          ratio: f32) -> Self
+        where A: Into<Ms>,
+              R: Into<Ms>,
+    {
+        Self::peak(attack_ms, release_ms, sample_hz, threshold, ratio)
+    }
+
+}
+
+impl<F> PeakMinCompressor<F>
+    where F: Frame,
+{
+
+    /// Construct a **Compressor** that uses the **Minimum** across all channels yielded by a
+    /// **Peak** **EnvelopeDetector**
+    pub fn peak_min<A, R>(attack_ms: A,
+                          release_ms: R,
+                          sample_hz: f64,
+                          threshold: f32,
+                          ratio: f32) -> Self
+        where A: Into<Ms>,
+              R: Into<Ms>,
+    {
+        Self::peak(attack_ms, release_ms, sample_hz, threshold, ratio)
+    }
+
+}
+
+impl<F, EGF> RmsCompressor<F, EGF>
+    where F: Frame,
+          EGF: EvenGainFunction,
+{
 
     /// Construct a **Compressor** that uses an **Rms** **EnvelopeDetector**.
-    pub fn new<W, A, R>(window_ms: W,
+    pub fn rms<W, A, R>(window_ms: W,
                         attack_ms: A,
                         release_ms: R,
                         sample_hz: f64,
-                        n_channels: usize,
                         threshold: f32,
                         ratio: f32) -> Self
         where W: Into<Ms>,
@@ -150,23 +241,12 @@ impl<F> RmsCompressor<F> {
         let window_frames = window_ms.samples(sample_hz) as usize;
         let attack_frames = attack_ms.samples(sample_hz) as f32;
         let release_frames = release_ms.samples(sample_hz) as f32;
-        let envelope_detector = MultiChannelEnvelopeDetector::rms(window_frames,
-                                                                  attack_frames,
-                                                                  release_frames,
-                                                                  n_channels);
+        let envelope_detector = EnvelopeDetector::rms(window_frames, attack_frames, release_frames);
         let rms_envelope_detector = RmsEnvelopeDetector {
             rms: envelope_detector,
             window_ms: window_ms,
         };
-        let slope = calc_slope(ratio);
-        Compressor {
-            envelope_detector: rms_envelope_detector,
-            attack_ms: attack_ms,
-            release_ms: release_ms,
-            threshold: threshold,
-            slope: slope,
-            even_gain_fn: PhantomData,
-        }
+        Compressor::new(rms_envelope_detector, attack_ms, release_ms, threshold, ratio)
     }
 
     /// Set the duration of the envelope's RMS window in milliseconds.
@@ -184,46 +264,44 @@ impl<F> RmsCompressor<F> {
 
 }
 
+impl<F> RmsAvgCompressor<F>
+    where F: Frame,
+{
 
-impl<D, F> Compressor<D, F> {
-
-    /// The next compressor gain for the channel at the given index.
-    ///
-    /// **Panics** if the given `channel_idx` is greater than the number of channels within the
-    /// **Compressor**'s `envelope_detector`.
-    #[inline]
-    pub fn next_gain_for_channel(&mut self, channel_idx: usize, sample: f32) -> f32
-        where D: Detector,
+    /// Construct a **Compressor** that uses the **Average** across all channels yielded by a
+    /// **Rms** **EnvelopeDetector**
+    pub fn rms_avg<W, A, R>(window_ms: W,
+                            attack_ms: A,
+                            release_ms: R,
+                            sample_hz: f64,
+                            threshold: f32,
+                            ratio: f32) -> Self
+        where W: Into<Ms>,
+              A: Into<Ms>,
+              R: Into<Ms>,
     {
-        let env_sample = self.envelope_detector.detector().next(channel_idx, sample);
-        if env_sample > self.threshold {
-            1.0 - (env_sample - self.threshold) * self.slope
-        } else {
-            1.0
-        }
+        Self::rms(window_ms, attack_ms, release_ms, sample_hz, threshold, ratio)
     }
 
-    /// Produce the gain to be applied evenly across all channels for the next frame.
-    ///
-    /// **Note:** This method assumes that the given number of samples is equal to the number of
-    /// channels with which the Compressor is currently set.
-    ///
-    /// **Panics** if the given `channel_idx` is greater than the number of channels within the
-    /// **Compressor**'s `envelope_detector`.
-    pub fn next_gain<I>(&mut self, sample_per_channel: I) -> f32
-        where D: Detector,
-              I: Iterator<Item=f32>,
-              F: EvenGainFunction,
-    {
-        F::next_gain(self, sample_per_channel)
-    }
+}
 
-    /// Set the number of channels for the **MultiChannelEnvelopeDetector**.
-    pub fn set_channels(&mut self, n_channels: usize)
-        where D: Clone + Detector,
-              D::Mode: Clone,
+impl<F> RmsMinCompressor<F>
+    where F: Frame,
+{
+
+    /// Construct a **Compressor** that uses the **Minimum** across all channels yielded by a
+    /// **Rms** **EnvelopeDetector**
+    pub fn rms_min<W, A, R>(window_ms: W,
+                            attack_ms: A,
+                            release_ms: R,
+                            sample_hz: f64,
+                            threshold: f32,
+                            ratio: f32) -> Self
+        where W: Into<Ms>,
+              A: Into<Ms>,
+              R: Into<Ms>,
     {
-        self.envelope_detector.detector().set_channels(n_channels);
+        Self::rms(window_ms, attack_ms, release_ms, sample_hz, threshold, ratio)
     }
 
 }
