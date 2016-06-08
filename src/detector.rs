@@ -1,4 +1,5 @@
 use envelope_detector::{Frame, Mode, EnvelopeDetector, Peak, Rms};
+use std;
 use time::Ms;
 
 /// A peak `Detector` type.
@@ -25,6 +26,15 @@ pub struct RmsEnvelopeDetector<F>
     pub rms: EnvelopeDetector<F, Rms<F>>,
     /// The duration of the RMS window used by the detector.
     pub window_ms: Ms,
+}
+
+impl<F> std::fmt::Debug for RmsEnvelopeDetector<F>
+    where F: Frame + std::fmt::Debug,
+          F::Float: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        write!(f, "RmsEnvelopeDetector {{ rms: {:?}, window_ms: {:?} }}", &self.rms, &self.window_ms)
+    }
 }
 
 
