@@ -4,10 +4,10 @@ extern crate dsp;
 use {Compressor, Detector, EvenGainFunction, PeakCompressor, RmsCompressor};
 
 
-impl<F, D, EFG> Compressor<F, D, EFG>
+impl<F, D, EGF> Compressor<F, D, EGF>
     where F: dsp::Frame,
           D: Detector<F>,
-          EFG: EvenGainFunction,
+          EGF: EvenGainFunction,
 {
     /// Compresses the given `output` using an even gain across all channels.
     #[inline]
