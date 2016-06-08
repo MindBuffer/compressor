@@ -2,10 +2,9 @@
 
 extern crate compressor;
 extern crate dsp;
-extern crate envelope_detector;
 extern crate portaudio as pa;
 
-use compressor::{PeakCompressor, Minimum};
+use compressor::Compressor;
 use dsp::Node;
 
 fn main() {
@@ -14,31 +13,28 @@ fn main() {
 
 fn run() -> Result<(), pa::Error> {
 
-    const CHANNELS: u16 = 2;
+    const CHANNELS: usize = 2;
     const SAMPLE_HZ: f64 = 44_100.0;
-    const ATTACK_MS: f64 = 10.0;
-    const RELEASE_MS: f64 = 10.0;
+    const ATTACK_MS: f64 = 1_000.0;
+    const RELEASE_MS: f64 = 1_000.0;
     const THRESHOLD: f32 = 0.1;
     const RATIO: f32 = 100.0;
 
-    let n_channels = CHANNELS as usize;
-    let mut compressor =
-        PeakCompressor::<Minimum>::new(ATTACK_MS, RELEASE_MS, SAMPLE_HZ, n_channels, THRESHOLD, RATIO);
+    let mut compressor = Compressor::peak_min(ATTACK_MS, RELEASE_MS, SAMPLE_HZ, THRESHOLD, RATIO);
 
     // Callback used to construct the duplex sound stream.
-    let callback = move |pa::DuplexStreamCallbackArgs { in_buffer, out_buffer, frames, .. }| {
+    let callback = move |pa::DuplexStreamCallbackArgs { in_buffer, out_buffer, .. }| {
+        let in_buffer: &[[f32; CHANNELS]] = dsp::slice::to_frame_slice(in_buffer).unwrap();
+        let out_buffer: &mut [[f32; CHANNELS]] = dsp::slice::to_frame_slice_mut(out_buffer).unwrap();
 
         // Write the input to the output for fun.
-        for (out_sample, in_sample) in out_buffer.iter_mut().zip(in_buffer.iter()) {
-            *out_sample = *in_sample;
-        }
+        dsp::slice::write(out_buffer, in_buffer);
 
         println!("");
         println!("{:?}", &out_buffer[0..4]);
 
-        // Update our rms state.
-        let settings = dsp::Settings::new(SAMPLE_HZ as u32, frames as u16, CHANNELS as u16);
-        compressor.audio_requested(out_buffer, settings);
+        // Process the buffer with our compressor.
+        compressor.audio_requested(out_buffer, SAMPLE_HZ);
 
         println!("{:?}", &out_buffer[0..4]);
 
